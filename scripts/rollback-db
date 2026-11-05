@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -e
+
+# FOMS Database Rollback / Restore Script
+# Usage: ./scripts/rollback-db <BACKUP_FILE> [TARGET_DATABASE] [SERVER]
+# SAFETY GUARD: Restore to live FOMS_DB is permanently disabled.
+
+BACKUP_FILE="$1"
+TARGET_DB="${2:-FOMS_DB_RESTORE_TEST}"
+SERVER="${3:-localhost\\SQLEXPRESS}"
+
+if [ -z "$BACKUP_FILE" ]; then
+    echo "ERROR: Missing backup file path."
+    echo "Usage: ./scripts/rollback-db <BACKUP_FILE> [TARGET_DATABASE] [SERVER]"
+    echo "Example: ./scripts/rollback-db backups/FOMS_DB_backup_20261105_173250.bak FOMS_DB_TEST"
+    exit 1
+fi
+
+if ! [[ "$TARGET_DB" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "ERROR: Target database must contain only letters, digits, and underscores."
+    exit 1
+fi
+
+TARGET_DB_UPPER=$(printf '%s' "$TARGET_DB" | tr '[:lower:]' '[:upper:]')
+if [ "$TARGET_DB_UPPER" = "FOMS_DB" ]; then
+    echo "SAFETY GUARD BLOCKED: Restoring to the live database [FOMS_DB] is permanently disabled."
+    exit 1
+fi
+
+echo "Restoring backup [$BACKUP_FILE] to database [$TARGET_DB] on [$SERVER]..."
+
+WINDOWS_PATH="$BACKUP_FILE"
+SQL_BACKUP_PATH="${WINDOWS_PATH//\'/\'\'}"
+sqlcmd -S "$SERVER" -E -C -Q "
+IF EXISTS (SELECT name FROM sys.databases WHERE name = N'$TARGET_DB')
+BEGIN
+    ALTER DATABASE [$TARGET_DB] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+END
+RESTORE DATABASE [$TARGET_DB] FROM DISK = N'$SQL_BACKUP_PATH' WITH REPLACE, RECOVERY, STATS = 10;
+ALTER DATABASE [$TARGET_DB] SET MULTI_USER;
+"
+echo "SUCCESS: Database [$TARGET_DB] restored successfully from [$BACKUP_FILE]."

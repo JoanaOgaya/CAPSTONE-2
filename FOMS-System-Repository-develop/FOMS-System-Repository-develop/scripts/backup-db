@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -e
+
+# FOMS Database Backup Script
+# Usage: ./scripts/backup-db [SERVER] [DATABASE] [BACKUP_DIR]
+
+SERVER="${1:-localhost\\SQLEXPRESS}"
+DATABASE="${2:-FOMS_DB}"
+WORKSPACE_ROOT="$(cd "$(dirname "$0")/.." && pwd -W 2>/dev/null || pwd)"
+BACKUP_DIR="${3:-$WORKSPACE_ROOT/backups}"
+
+if ! [[ "$DATABASE" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "ERROR: Database name must contain only letters, digits, and underscores." >&2
+    exit 1
+fi
+
+mkdir -p "$BACKUP_DIR"
+
+TIMESTAMP="$(date +"%Y%m%d_%H%M%S")_$$"
+BACKUP_FILE="${BACKUP_DIR}/${DATABASE}_backup_${TIMESTAMP}.bak"
+if [[ -e "$BACKUP_FILE" ]]; then
+    echo "ERROR: Refusing to overwrite an existing backup: $BACKUP_FILE" >&2
+    exit 1
+fi
+
+WINDOWS_PATH="$(echo "$BACKUP_FILE" | sed -e 's/^\///' -e 's/\//\\/g' -e 's/^./\0:/')"
+if [[ "$BACKUP_FILE" =~ ^[A-Za-z]: ]]; then
+    WINDOWS_PATH="$BACKUP_FILE"
+fi
+SQL_BACKUP_PATH="${WINDOWS_PATH//\'/\'\'}"
+
+echo "Backing up database [$DATABASE] from [$SERVER] to [$BACKUP_FILE]..."
+
+sqlcmd -S "$SERVER" -E -C -Q "BACKUP DATABASE [$DATABASE] TO DISK = N'$SQL_BACKUP_PATH' WITH INIT, STATS = 10"
+
+if [ -f "$BACKUP_FILE" ]; then
+    SIZE=$(stat -c%s "$BACKUP_FILE" 2>/dev/null || wc -c < "$BACKUP_FILE")
+    echo "SUCCESS: Database backup completed: $BACKUP_FILE ($SIZE bytes)"
+else
+    echo "ERROR: Backup file was not created."
+    exit 1
+fi
